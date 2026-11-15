@@ -21,6 +21,7 @@ class RunSplitFieldView extends WatchUi.DataField {
     function initialize() {
         DataField.initialize();
         mZones = UserProfile.getHeartRateZones(UserProfile.getCurrentSport());
+        System.println("Zones: " + mZones);
     }
 
     // Called about once per second with the latest activity data.
@@ -91,11 +92,11 @@ class RunSplitFieldView extends WatchUi.DataField {
         var hr = mHeartRate;
         var hrText = (hr == null) ? "--" : hr.toString();
         dc.setColor(zoneColor(hr, fg), Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, h * 0.22, Graphics.FONT_NUMBER_MEDIUM, hrText, center);
+        dc.drawText(cx, h * 0.24, Graphics.FONT_NUMBER_MEDIUM, hrText, center);
 
         // Pace
         dc.setColor(fg, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, h * 0.50, Graphics.FONT_NUMBER_HOT, formatPace(mSpeed), center);
+        dc.drawText(cx, h * 0.48, Graphics.FONT_NUMBER_MEDIUM, formatPace(mSpeed), center);
 
         // Step time left, or total time when there's no timed step
         var label = "TIME";
@@ -105,8 +106,8 @@ class RunSplitFieldView extends WatchUi.DataField {
             label = "STEP LEFT";
             secs = stepDur - (mTimerMs - mStepStartMs) / 1000;
         }
-        dc.drawText(cx, h * 0.77, Graphics.FONT_NUMBER_MEDIUM, formatTime(secs), center);
-        dc.drawText(cx, h * 0.91, Graphics.FONT_XTINY, label, center);
+        dc.drawText(cx, h * 0.70, Graphics.FONT_NUMBER_MEDIUM, formatTime(secs), center);
+        dc.drawText(cx, h * 0.86, Graphics.FONT_XTINY, label, center);
     }
 
     hidden function zoneColor(hr as Number or Null, fallback as Number) as Number {
