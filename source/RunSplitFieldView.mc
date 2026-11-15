@@ -88,11 +88,18 @@ class RunSplitFieldView extends WatchUi.DataField {
         var h = dc.getHeight();
         var center = Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER;
 
-        // Heart rate, colored by zone
+        // Heart rate number, with a zone-colored dot to its left
         var hr = mHeartRate;
         var hrText = (hr == null) ? "--" : hr.toString();
-        dc.setColor(zoneColor(hr, fg), Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, h * 0.24, Graphics.FONT_NUMBER_MEDIUM, hrText, center);
+        var hrY = h * 0.24;
+        dc.setColor(fg, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx, hrY, Graphics.FONT_NUMBER_MEDIUM, hrText, center);
+        var dotColor = zoneColor(hr, Graphics.COLOR_TRANSPARENT);
+        if (dotColor != Graphics.COLOR_TRANSPARENT) {
+            var textW = dc.getTextWidthInPixels(hrText, Graphics.FONT_NUMBER_MEDIUM);
+            dc.setColor(dotColor, Graphics.COLOR_TRANSPARENT);
+            drawHeart(dc, cx - textW / 2 - 16, hrY - 2, 5);
+        }
 
         // Pace
         dc.setColor(fg, Graphics.COLOR_TRANSPARENT);
@@ -120,6 +127,13 @@ class RunSplitFieldView extends WatchUi.DataField {
         if (hr <= zones[3]) { return Graphics.COLOR_GREEN; }   // zone 3
         if (hr <= zones[4]) { return Graphics.COLOR_ORANGE; }  // zone 4
         return Graphics.COLOR_RED;                             // zone 5
+    }
+
+    // Two circles on top plus a triangle underneath make a heart shape.
+    hidden function drawHeart(dc as Dc, x as Numeric, y as Numeric, r as Number) as Void {
+        dc.fillCircle(x - r, y - r / 2, r);
+        dc.fillCircle(x + r, y - r / 2, r);
+        dc.fillPolygon([[x - 2 * r, y], [x + 2 * r, y], [x, y + 2 * r + 2]]);
     }
 
     hidden function formatPace(speed as Float or Null) as String {
