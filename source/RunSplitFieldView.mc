@@ -1,82 +1,145 @@
 import Toybox.Activity;
 import Toybox.Graphics;
 import Toybox.Lang;
+import Toybox.System;
+import Toybox.UserProfile;
 import Toybox.WatchUi;
 
+// One full-screen data field: heart rate (colored by zone) on top,
+// pace in the middle, and time left in the current workout step on the bottom.
+// If no timed workout step is active, the bottom shows total timer instead.
 class RunSplitFieldView extends WatchUi.DataField {
 
-    hidden var mValue as Numeric;
+    hidden var mHeartRate as Number or Null = null;
+    hidden var mSpeed as Float or Null = null;            // meters per second
+    hidden var mTimerMs as Number = 0;                    // total activity timer in ms
+    hidden var mStepStartMs as Number = 0;                // timer value when the current step began
+    hidden var mStepDurationSec as Number or Null = null; // planned length of the current step
+    hidden var mStepKey as String = "";                   // used to detect when the step changes
+    hidden var mZones as Array<Number> or Null = null;    // [z1 min, z1 max, z2 max, z3 max, z4 max, z5 max]
 
     function initialize() {
         DataField.initialize();
-        mValue = 0.0f;
+        mZones = UserProfile.getHeartRateZones(UserProfile.getCurrentSport());
     }
 
-    // Set your layout here. Anytime the size of obscurity of
-    // the draw context is changed this will be called.
-    function onLayout(dc as Dc) as Void {
-        var obscurityFlags = DataField.getObscurityFlags();
-
-        // Top left quadrant so we'll use the top left layout
-        if (obscurityFlags == (OBSCURE_TOP | OBSCURE_LEFT)) {
-            View.setLayout(Rez.Layouts.TopLeftLayout(dc));
-
-        // Top right quadrant so we'll use the top right layout
-        } else if (obscurityFlags == (OBSCURE_TOP | OBSCURE_RIGHT)) {
-            View.setLayout(Rez.Layouts.TopRightLayout(dc));
-
-        // Bottom left quadrant so we'll use the bottom left layout
-        } else if (obscurityFlags == (OBSCURE_BOTTOM | OBSCURE_LEFT)) {
-            View.setLayout(Rez.Layouts.BottomLeftLayout(dc));
-
-        // Bottom right quadrant so we'll use the bottom right layout
-        } else if (obscurityFlags == (OBSCURE_BOTTOM | OBSCURE_RIGHT)) {
-            View.setLayout(Rez.Layouts.BottomRightLayout(dc));
-
-        // Use the generic, centered layout
-        } else {
-            View.setLayout(Rez.Layouts.MainLayout(dc));
-            var labelView = View.findDrawableById("label") as Text;
-            labelView.locY = labelView.locY - 16;
-            var valueView = View.findDrawableById("value") as Text;
-            valueView.locY = valueView.locY + 7;
-        }
-
-        (View.findDrawableById("label") as Text).setText(Rez.Strings.label);
-    }
-
-    // The given info object contains all the current workout information.
-    // Calculate a value and save it locally in this method.
-    // Note that compute() and onUpdate() are asynchronous, and there is no
-    // guarantee that compute() will be called before onUpdate().
+    // Called about once per second with the latest activity data.
     function compute(info as Activity.Info) as Void {
-        // See Activity.Info in the documentation for available information.
-        if(info has :currentHeartRate){
-            if(info.currentHeartRate != null){
-                mValue = info.currentHeartRate as Number;
-            } else {
-                mValue = 0.0f;
-            }
+        mHeartRate = info.currentHeartRate;
+        mSpeed = info.currentSpeed;
+        var t = info.timerTime;
+        mTimerMs = (t != null) ? t : 0;
+        updateStep();
+    }
+
+    // The API gives the current step's planned duration but not how long
+    // we've been in it, so we record the timer value whenever the step changes.
+    hidden function updateStep() as Void {
+        mStepDurationSec = null;
+        if (!(Activity has :getCurrentWorkoutStep)) {
+            return;
+        }
+        var stepInfo = Activity.getCurrentWorkoutStep();
+        if (stepInfo == null) {
+            mStepKey = "";
+            return;
+        }
+
+        var raw = stepInfo.step;
+        var step = null;
+        if (raw instanceof Activity.WorkoutIntervalStep) {
+            step = raw.activeStep;
+        } else if (raw instanceof Activity.WorkoutStep) {
+            step = raw;
+        }
+
+        if (step != null && step.durationType == Activity.WORKOUT_STEP_DURATION_TIME) {
+            mStepDurationSec = step.durationValue;
+        }
+
+        var key = "" + stepInfo.name + "|" + stepInfo.intensity + "|" + mStepDurationSec;
+        if (!key.equals(mStepKey)) {
+            mStepKey = key;
+            mStepStartMs = mTimerMs;
+            // Check the Debug Console to confirm durationValue is in seconds.
+            System.println("New step: " + key);
         }
     }
 
-    // Display the value you computed here. This will be called
-    // once a second when the data field is visible.
+    // Step changes on Garmin also create a lap, so this catches back-to-back
+    // steps that look identical (like repeated intervals).
+    function onTimerLap() as Void {
+        mStepStartMs = mTimerMs;
+    }
+
+    function onTimerReset() as Void {
+        mStepStartMs = 0;
+        mStepKey = "";
+    }
+
     function onUpdate(dc as Dc) as Void {
-        // Set the background color
-        (View.findDrawableById("Background") as Text).setColor(getBackgroundColor());
+        var bg = getBackgroundColor();
+        var fg = (bg == Graphics.COLOR_BLACK) ? Graphics.COLOR_WHITE : Graphics.COLOR_BLACK;
+        dc.setColor(fg, bg);
+        dc.clear();
 
-        // Set the foreground color and value
-        var value = View.findDrawableById("value") as Text;
-        if (getBackgroundColor() == Graphics.COLOR_BLACK) {
-            value.setColor(Graphics.COLOR_WHITE);
-        } else {
-            value.setColor(Graphics.COLOR_BLACK);
+        var cx = dc.getWidth() / 2;
+        var h = dc.getHeight();
+        var center = Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER;
+
+        // Heart rate, colored by zone
+        var hr = mHeartRate;
+        var hrText = (hr == null) ? "--" : hr.toString();
+        dc.setColor(zoneColor(hr, fg), Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx, h * 0.22, Graphics.FONT_NUMBER_MEDIUM, hrText, center);
+
+        // Pace
+        dc.setColor(fg, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx, h * 0.50, Graphics.FONT_NUMBER_HOT, formatPace(mSpeed), center);
+
+        // Step time left, or total time when there's no timed step
+        var label = "TIME";
+        var secs = mTimerMs / 1000;
+        var stepDur = mStepDurationSec;
+        if (stepDur != null) {
+            label = "STEP LEFT";
+            secs = stepDur - (mTimerMs - mStepStartMs) / 1000;
         }
-        value.setText(mValue.format("%.2f"));
-
-        // Call parent's onUpdate(dc) to redraw the layout
-        View.onUpdate(dc);
+        dc.drawText(cx, h * 0.77, Graphics.FONT_NUMBER_MEDIUM, formatTime(secs), center);
+        dc.drawText(cx, h * 0.91, Graphics.FONT_XTINY, label, center);
     }
 
+    hidden function zoneColor(hr as Number or Null, fallback as Number) as Number {
+        var zones = mZones;
+        if (hr == null || zones == null || hr < zones[0]) {
+            return fallback;
+        }
+        if (hr <= zones[1]) { return Graphics.COLOR_DK_GRAY; } // zone 1
+        if (hr <= zones[2]) { return Graphics.COLOR_BLUE; }    // zone 2
+        if (hr <= zones[3]) { return Graphics.COLOR_GREEN; }   // zone 3
+        if (hr <= zones[4]) { return Graphics.COLOR_ORANGE; }  // zone 4
+        return Graphics.COLOR_RED;                             // zone 5
+    }
+
+    hidden function formatPace(speed as Float or Null) as String {
+        if (speed == null || speed < 0.5) {
+            return "--:--";
+        }
+        var meters = (System.getDeviceSettings().paceUnits == System.UNIT_STATUTE) ? 1609.344 : 1000.0;
+        var secPerUnit = (meters / speed).toNumber();
+        return (secPerUnit / 60).format("%d") + ":" + (secPerUnit % 60).format("%02d");
+    }
+
+    hidden function formatTime(secs as Number) as String {
+        if (secs < 0) {
+            secs = 0;
+        }
+        var hrs = secs / 3600;
+        var mins = (secs % 3600) / 60;
+        var s = secs % 60;
+        if (hrs > 0) {
+            return hrs.format("%d") + ":" + mins.format("%02d") + ":" + s.format("%02d");
+        }
+        return mins.format("%d") + ":" + s.format("%02d");
+    }
 }
